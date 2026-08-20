@@ -1,0 +1,163 @@
+# =============================================================================
+# DOCKER COMPOSE COMPLETO, APENAS PARA DESENVOLVIMENTO LOCAL (tudo num PC)
+# Para produção em 2 PCs, usar:
+#   PC1: docker compose -f docker-compose-pc1.yml up -d
+#   PC2: docker compose -f docker-compose-pc2.yml up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. MySQL (Base de Dados Relacional - PC2)
+  # ==========================================
+  mysql:
+    image: mysql:8.0
+    container_name: pisid_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: pisid_maze
+      MYSQL_USER: aluno
+      MYSQL_PASSWORD: aluno
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Executa automaticamente os SQL do teu colega:
+      - ./mysql-init:/docker-entrypoint-initdb.d 
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 2. Servidor Web (Apache + PHP)
+  # ==========================================
+  web-php:
+    image: php:8.2-apache
+    container_name: pisid_web_php
+    restart: unless-stopped
+    ports:
+      - "80:80" # Acede no browser via http://localhost
+    volumes:
+      - ./html:/var/www/html # Pasta para os vossos ficheiros PHP
+    depends_on:
+      - mysql
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 3. Interface Web para o MySQL (phpMyAdmin)
+  # ==========================================
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: pisid_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8080:80" # Acede via http://localhost:8080
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: aluno
+      PMA_PASSWORD: aluno
+    depends_on:
+      - mysql
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 4. MQTT Broker (Eclipse Mosquitto)
+  # ==========================================
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: pisid_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883" # Porta padrão para o Python receber/enviar mensagens MQTT
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 5. MongoDB - NÓ 1 (Primary - PC1)
+  # ==========================================
+  mongo1:
+    image: mongo:6.0
+    container_name: pisid_mongo1
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27020"]
+    ports:
+      - "27020:27020"
+    volumes:
+      - mongo1_data:/data/db
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 6. MongoDB - NÓ 2 (Secondary - PC1)
+  # ==========================================
+  mongo2:
+    image: mongo:6.0
+    container_name: pisid_mongo2
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27018"]
+    ports:
+      - "27018:27018"
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 7. MongoDB - NÓ 3 (Secondary/Arbiter - PC1)
+  # ==========================================
+  mongo3:
+    image: mongo:6.0
+    container_name: pisid_mongo3
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27019"]
+    ports:
+      - "27019:27019"
+    volumes:
+      - mongo3_data:/data/db
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 8. MongoDB - SETUP DA REPLICA SET
+  # ==========================================
+  mongo-setup:
+    image: mongo:6.0
+    container_name: pisid_mongo_setup
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    networks:
+      - pisid_network
+    command: >
+      mongosh --host mongo1:27020 --eval 
+      '
+      rs.initiate({
+        _id: "rs0",
+        members: [
+          { _id: 0, host: "mongo1:27020" },
+          { _id: 1, host: "mongo2:27018" },
+          { _id: 2, host: "mongo3:27019" }
+        ]
+      })
+      '
+
+# ==========================================
+# Redes e Volumes partilhados
+# ==========================================
+networks:
+  pisid_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  mosquitto_data:
+  mosquitto_log:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:

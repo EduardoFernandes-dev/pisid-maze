@@ -1,0 +1,108 @@
+# =============================================================================
+# DOCKER COMPOSE - PC1 (MongoDB Replica Set + MQTT Broker Local)
+# =============================================================================
+# Usar: docker compose -f docker-compose-pc1.yml up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. MQTT Broker Local (Eclipse Mosquitto)
+  # ==========================================
+  # O Script 1 publica aqui os dados válidos.
+  # O Script 2 (no PC2) subscreve a este broker via IP do PC1.
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: pisid_mqtt
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 2. MongoDB - NÓ 1 (Primary)
+  # ==========================================
+  mongo1:
+    image: mongo:6.0
+    container_name: pisid_mongo1
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27020"]
+    ports:
+      - "27020:27020"
+    volumes:
+      - mongo1_data:/data/db
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 3. MongoDB - NÓ 2 (Secondary)
+  # ==========================================
+  mongo2:
+    image: mongo:6.0
+    container_name: pisid_mongo2
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27018"]
+    ports:
+      - "27018:27018"
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 4. MongoDB - NÓ 3 (Secondary)
+  # ==========================================
+  mongo3:
+    image: mongo:6.0
+    container_name: pisid_mongo3
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27019"]
+    ports:
+      - "27019:27019"
+    volumes:
+      - mongo3_data:/data/db
+    networks:
+      - pisid_network
+
+  # ==========================================
+  # 5. MongoDB - SETUP DA REPLICA SET
+  # ==========================================
+  mongo-setup:
+    image: mongo:6.0
+    container_name: pisid_mongo_setup
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    networks:
+      - pisid_network
+    command: >
+      mongosh --host mongo1:27020 --eval 
+      '
+      rs.initiate({
+        _id: "rs0",
+        members: [
+          { _id: 0, host: "mongo1:27020" },
+          { _id: 1, host: "mongo2:27018" },
+          { _id: 2, host: "mongo3:27019" }
+        ]
+      })
+      '
+
+# ==========================================
+# Redes e Volumes
+# ==========================================
+networks:
+  pisid_network:
+    driver: bridge
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:

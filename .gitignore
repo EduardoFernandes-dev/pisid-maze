@@ -1,0 +1,9 @@
+.idea/
+__pycache__/
+*.py[cod]
+.venv/
+logs/
+backups/
+*.db
+*.sqlite3
+.DS_Store
